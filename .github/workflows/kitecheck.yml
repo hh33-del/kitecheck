@@ -1,0 +1,40 @@
+name: Kitecheck
+
+on:
+  schedule:
+    # Tijden in UTC. 04:00 en 13:00 UTC = 06:00 en 15:00 Nederlandse zomertijd.
+    # In de winter schuift dat een uur op; dat is voor deze tool geen probleem.
+    - cron: "0 4 * * *"
+    - cron: "0 13 * * *"
+  workflow_dispatch:        # knop om hem handmatig te draaien
+
+permissions:
+  contents: write           # nodig om docs/index.html terug te committen
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Draai kitecheck
+        env:
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          MAIL_TO: ${{ secrets.MAIL_TO }}
+          PAGES_URL: ${{ vars.PAGES_URL }}
+        run: python kitecheck.py
+
+      - name: Commit de tabel
+        run: |
+          git config user.name  "kitecheck"
+          git config user.email "actions@github.com"
+          git add docs/index.html
+          git diff --staged --quiet || git commit -m "kitecheck $(date -u +%F\ %H:%M)"
+          git push
