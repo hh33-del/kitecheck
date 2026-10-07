@@ -128,7 +128,7 @@ def dir_ok(deg: float, sectors: list) -> bool:
 def score_hour(speed, gust, direction, precip, code, spot, rider) -> str:
     if None in (speed, gust, direction):
         return RED
-    if code in THUNDER_CODES:
+    if code in THUNDER_CODES and rider.get("rain_max", 1.0) < 99:
         return RED
     if not dir_ok(direction, spot["dirs"]):
         return RED
@@ -137,10 +137,13 @@ def score_hour(speed, gust, direction, precip, code, spot, rider) -> str:
     lo, hi, max_delta = rider["min_kn"], rider["max_kn"], rider["max_delta"]
     rain = precip or 0.0
 
-    if lo <= speed <= hi and delta <= max_delta and rain < 1.0:
+    rain_max = rider.get("rain_max", 1.0)
+
+    if lo <= speed <= hi and delta <= max_delta and rain < rain_max:
         return GREEN
     # Randgevallen: net te slap, net te hard, net te vlagerig, of nat.
-    if (lo - 2) <= speed <= (hi + 3) and delta <= (max_delta + 3) and rain < 2.5:
+    if (lo - 2) <= speed <= (hi + 3) and delta <= (max_delta + 3) \
+            and rain < rain_max + 1.5:
         return AMBER
     return RED
 
@@ -357,7 +360,7 @@ def render_html(tables: dict, days: list, stamp: str) -> str:
 # Mail: tabel per dag, spots als rijen, dagdelen als kolommen
 # ---------------------------------------------------------------------------
 
-PARTS = [("ochtend", 9, 12), ("vroege middag", 12, 14),
+PARTS = [("ochtend", 8, 12), ("vroege middag", 12, 14),
          ("late middag", 14, 17), ("avond", 17, 20)]
 PART_SHORT = ["Ocht", "Vr mid", "Lt mid", "Avond"]
 
@@ -378,6 +381,19 @@ def part_wave(waves, spot, day, part):
     return max(vals) if vals else None
 
 
+def part_weather(available, day, part):
+    """(hoogste mm regen per uur, onweer ja/nee) binnen dit dagdeel."""
+    rain, thunder = 0.0, False
+    for m in models_for_day(available, day):
+        for h in available[m][day]:
+            if not (part[1] <= h["hour"] < part[2]):
+                continue
+            rain = max(rain, h["precip"] or 0.0)
+            if h["code"] in THUNDER_CODES:
+                thunder = True
+    return rain, thunder
+
+
 def part_grade(spot, rider, available, day, daylight, part):
     """Beoordeel een dagdeel: green / yellow / orange / none / dark."""
     lo_h, hi_h = part[1], part[2]
@@ -388,7 +404,7 @@ def part_grade(spot, rider, available, day, daylight, part):
     if lo_h >= hi_h:
         return "dark", None          # buiten daglicht
 
-    loose = dict(rider, max_delta=999)
+    loose = dict(rider, max_delta=999, rain_max=999)
     out = []
     for m in models_for_day(available, day):
         hours = [h for h in available[m][day] if lo_h <= h["hour"] < hi_h]
@@ -412,7 +428,7 @@ def part_grade(spot, rider, available, day, daylight, part):
 ORDER = ["green", "yellow", "orange", "none", "dark"]
 
 
-def cell_html(grades, res, wave=None):
+def cell_html(grades, res, wave=None, rain=0.0, thunder=False):
     if isinstance(grades, str):
         grades = [grades]
     uniq = [g for g in grades if g]
@@ -434,6 +450,14 @@ def cell_html(grades, res, wave=None):
         if wave is not None:
             txt += (f"<br><span style='font-size:11px'>"
                     f"{wave:.1f}m</span>")
+        extra = []
+        if thunder:
+            extra.append("onweer")
+        elif rain >= 0.5:
+            extra.append(f"{rain:.0f}mm" if rain >= 1 else "regen")
+        if extra:
+            txt += (f"<br><span style='font-size:11px;opacity:.85'>"
+                    f"{' '.join(extra)}</span>")
     return (f"<td style='{style}color:{fg};padding:7px 4px;"
             f"text-align:center;font-size:13px;line-height:1.25;"
             f"border:1px solid #00000022'>{txt}</td>")
@@ -458,7 +482,9 @@ def build_mail(cache, light, waves, days, rider):
                                   light.get(spot["name"], {}), part)
                 if any(x in ("green", "yellow") for x in g):
                     hit = True
-                cells.append(cell_html(g, r, part_wave(waves, spot, day, part)))
+                rn, th = part_weather(cache[spot["name"]], day, part)
+                cells.append(cell_html(g, r, part_wave(waves, spot, day, part),
+                                       rn, th))
             rows.append((spot, cells))
 
         if not hit:                      # pas dan Brouwersdam erbij
@@ -467,8 +493,10 @@ def build_mail(cache, light, waves, days, rider):
                 for part in PARTS:
                     g, r = part_grade(spot, rider, cache[spot["name"]], day,
                                       light.get(spot["name"], {}), part)
+                    rn, th = part_weather(cache[spot["name"]], day, part)
                     cells.append(cell_html(g, r,
-                                           part_wave(waves, spot, day, part)))
+                                           part_wave(waves, spot, day, part),
+                                           rn, th))
                 rows.append((spot, cells))
 
         if hit:
