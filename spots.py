@@ -1,22 +1,15 @@
 """
-Spotprofielen en riderprofielen.
+Spotprofielen en riderprofiel.
 
 DIT IS HET ENIGE BESTAND DAT JE NORMAAL AANPAST.
 """
 
 RIDERS = {
-    "hester": {
-        "label": "Hester",
+    "samen": {
+        "label": "Hester & Marina",
         "min_kn": 15,
-        "max_kn": 22,
-        "max_delta": 10,
-        "needs_shallow": True,
-    },
-    "marina": {
-        "label": "Marina",
-        "min_kn": 12,
         "max_kn": 28,
-        "max_delta": 14,
+        "max_delta": 10,       # drempel voor het label "rustig"
         "needs_shallow": False,
     },
 }
@@ -24,6 +17,7 @@ RIDERS = {
 SPOTS = [
     {
         "name": "Strand Horst",
+        "wf": "strand_horst",
         "lat": 52.3103,
         "lon": 5.5593,
         "dirs": [(200, 50)],
@@ -35,6 +29,7 @@ SPOTS = [
     },
     {
         "name": "Muiderberg",
+        "wf": "muiderberg",
         "lat": 52.3258,
         "lon": 5.1208,
         "dirs": [(315, 90)],
@@ -46,6 +41,7 @@ SPOTS = [
     },
     {
         "name": "Schellinkhout",
+        "wf": "schellinkhout",
         "lat": 52.6180,
         "lon": 5.1250,
         "dirs": [(135, 270)],
@@ -57,17 +53,20 @@ SPOTS = [
     },
     {
         "name": "Zandmotor (Kijkduin)",
+        "wf": "kijkduin_den_haag",
         "lat": 52.0533,
         "lon": 4.1867,
         "dirs": [(180, 360)],
         "shallow": True,
         "tide": "SCHEVENINGEN",
+        "sea": (52.0600, 4.1600),
         "drive_min": 55,
         "primary": True,
         "note": "Zee, maar ondiepe lagune bij de Zandmotor.",
     },
     {
         "name": "Brouwersdam meerzijde",
+        "wf": "brouwersdam",
         "lat": 51.7580,
         "lon": 3.8560,
         "dirs": [(200, 290)],
@@ -79,22 +78,26 @@ SPOTS = [
     },
     {
         "name": "Wijk aan Zee",
+        "wf": "wijk_aan_zee",
         "lat": 52.4700,
         "lon": 4.5700,
         "dirs": [(200, 360)],
         "shallow": False,
         "tide": "IJMUIDEN",
+        "sea": (52.4750, 4.5400),
         "drive_min": 50,
         "primary": False,
         "note": "Water >2 m, staan kan niet: waterstart vereist. Alleen Zone 2.",
     },
     {
         "name": "Brouwersdam zeezijde",
+        "wf": "brouwersdam",
         "lat": 51.7602,
         "lon": 3.8471,
         "dirs": [(200, 20)],
         "shallow": True,
         "tide": "BROUWERSHAVENSCHE GAT 08",
+        "sea": (51.7700, 3.8200),
         "drive_min": 105,
         "primary": False,
         "note": "Alleen rond laagwater ondiep. Stroming bij opkomend water.",
