@@ -322,14 +322,16 @@ def wave_note(waves: dict, day, window) -> str:
     vals = [v for h, v in hours.items() if window[0] <= h < window[1]]
     if not vals:
         return ""
-    return f", golven tot {max(vals):.1f} m"
+    top = max(vals)
+    warn = " LET OP" if top >= 1.5 else ""
+    return f", golven tot {top:.1f} m{warn}"
 
 
 def digest(cache: dict, light: dict, waves: dict, days: list) -> tuple[str, str]:
     blocks, headline = [], []
 
     for rider_key, rider in RIDERS.items():
-        lines, first = [], None
+        lines, cands = [], []
         for day in days:
             label = f"{DAYNAMES[day.weekday()]} {day.day}"
             entries = []
@@ -352,16 +354,15 @@ def digest(cache: dict, light: dict, waves: dict, days: list) -> tuple[str, str]
                     f"delta {best['delta']} ({gust_mark(best['delta'], rider)})"
                     f"{wave_note(waves.get(spot['name'], {}), day, best['window'])}"
                     f" [{agree}]\n      {WF}{spot.get('wf', '')}")
-                if first is None:
-                    first = (label, spot["name"], f"{a}-{b}u", kn,
-                             best["delta"], rider)
+                cands.append((best["delta"], 0 if len(found) > 1 else 1,
+                              label, spot["name"], f"{a}-{b}u", kn))
             lines.append(f"  {label}:" + ("" if entries else " geen wind"))
             lines.extend(entries)
 
-        if first:
-            lab, sp, win, kn, dl, rd = first
-            headline.append(f"{rd['label']}: {lab} {sp} {win} ({kn} kn, "
-                            f"{gust_mark(dl, rd)})")
+        if cands:
+            dl, _, lab, sp, win, kn = min(cands)
+            headline.append(f"{rider['label']}: beste is {lab} {sp} {win} "
+                            f"({kn} kn, {gust_mark(dl, rider)})")
         else:
             headline.append(f"{rider['label']}: niets met genoeg wind")
 
