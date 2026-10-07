@@ -2,14 +2,13 @@ name: Kitecheck
 
 on:
   schedule:
-    # Tijden in UTC. 04:00 en 13:00 UTC = 06:00 en 15:00 Nederlandse zomertijd.
-    # In de winter schuift dat een uur op; dat is voor deze tool geen probleem.
+    # 04:00 UTC = 06:00 Nederlandse zomertijd. Een tweede regel toevoegen
+    # (bv "0 13 * * *") geeft ook een middagmail.
     - cron: "0 4 * * *"
-    - cron: "0 13 * * *"
-  workflow_dispatch:        # knop om hem handmatig te draaien
+  workflow_dispatch:
 
 permissions:
-  contents: write           # nodig om docs/index.html terug te committen
+  contents: write
 
 jobs:
   check:
