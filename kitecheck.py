@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
-"""
-Kitecheck -- twee keer per dag een overzicht van waar het deze week kan.
-"""
+"""Kitecheck -- dagelijkse mail met waar het de komende 7 dagen kan."""
 
 from __future__ import annotations
 
@@ -19,12 +17,13 @@ from email.message import EmailMessage
 from spots import SPOTS, RIDERS
 
 API = "https://api.open-meteo.com/v1/forecast"
+MARINE_API = "https://marine-api.open-meteo.com/v1/marine"
+WF = "https://nl.windfinder.com/weatherforecast/"
 
 MODELS_NEAR = ["knmi_harmonie_arome_netherlands", "icon_d2"]
 MODELS_FAR = ["ecmwf_ifs025", "icon_global"]
 ALL_MODELS = MODELS_NEAR + MODELS_FAR
 
-# Buitengrenzen; de echte grens per dag is zonsopkomst/zonsondergang.
 DAY_START, DAY_END = 8, 22
 SUNSET_MARGIN_H = 1
 
@@ -34,6 +33,7 @@ THUNDER_CODES = {95, 96, 99}
 GREEN, AMBER, RED = "green", "amber", "red"
 RANK = {RED: 0, AMBER: 1, GREEN: 2}
 DOT = {GREEN: "\U0001F7E2", AMBER: "\U0001F7E1", RED: "\U0001F534"}
+DAYNAMES = ["ma", "di", "wo", "do", "vr", "za", "zo"]
 
 
 def fetch(spot: dict) -> dict:
@@ -51,6 +51,34 @@ def fetch(spot: dict) -> dict:
     url = f"{API}?{urllib.parse.urlencode(params)}"
     with urllib.request.urlopen(url, timeout=45) as resp:
         return json.loads(resp.read().decode())
+
+
+def fetch_waves(spot: dict) -> dict:
+    if "sea" not in spot:
+        return {}
+    lat, lon = spot["sea"]
+    params = {
+        "latitude": lat,
+        "longitude": lon,
+        "hourly": "wave_height",
+        "timezone": "Europe/Amsterdam",
+        "forecast_days": FORECAST_DAYS,
+    }
+    url = f"{MARINE_API}?{urllib.parse.urlencode(params)}"
+    try:
+        with urllib.request.urlopen(url, timeout=45) as resp:
+            data = json.loads(resp.read().decode())
+    except Exception as exc:
+        print(f"Golfdata mislukt voor {spot['name']}: {exc}", file=sys.stderr)
+        return {}
+
+    hourly = data.get("hourly", {})
+    out: dict = defaultdict(dict)
+    for t, h in zip(hourly.get("time", []), hourly.get("wave_height", [])):
+        stamp = datetime.fromisoformat(t)
+        if h is not None:
+            out[stamp.date()][stamp.hour] = h
+    return dict(out)
 
 
 def series(hourly: dict, field: str, model: str) -> list:
@@ -161,7 +189,6 @@ def regroup(data: dict, model: str) -> dict:
 
 
 def daylight_map(data: dict) -> dict:
-    """{datum: (eerste bruikbare uur, laatste bruikbare uur)}."""
     daily = data.get("daily", {})
     days = daily.get("time", [])
     if not days:
@@ -214,9 +241,6 @@ def build_rows(spot: dict, rider: dict, available: dict, days: list,
     return rows
 
 
-DAYNAMES = ["ma", "di", "wo", "do", "vr", "za", "zo"]
-
-
 def render_html(tables: dict, days: list, stamp: str) -> str:
     css = """
     body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
@@ -244,70 +268,110 @@ def render_html(tables: dict, days: list, stamp: str) -> str:
         rider = RIDERS[rider_key]
         out.append(f"<h2>{rider['label']} &middot; {rider['min_kn']}-"
                    f"{rider['max_kn']} kn, delta max {rider['max_delta']}</h2>")
+        out.append("<table><tr><th>Spot</th>")
+        for d in days:
+            out.append(f"<th>{DAYNAMES[d.weekday()]} {d.day}</th>")
+        out.append("</tr>")
 
-        for primary in (True, False):
-            group = [(s, r) for s, r in spot_tables if s["primary"] == primary]
-            group = [(s, r) for s, r in group
-                     if not (rider["needs_shallow"] and not s["shallow"])]
-            if not group:
-                continue
-            if not primary:
-                out.append("<h2 style='font-size:14px;color:#77776f'>"
-                           "Overige spots</h2>")
-            out.append("<table><tr><th>Spot</th>")
-            for d in days:
-                out.append(f"<th>{DAYNAMES[d.weekday()]} {d.day}</th>")
+        for spot, rows in spot_tables:
+            out.append(f"<tr><td class='spot'>{spot['name']}</td>")
+            for row in rows:
+                dots = "".join(DOT[r["verdict"]] for r in row["results"]) or "&mdash;"
+                texts = [cell_text(r) or "&mdash;" for r in row["results"]]
+                body = "" if all(t == "&mdash;" for t in texts) \
+                    else "<br>".join(texts)
+                out.append(f"<td><span class='dots'>{dots}</span>"
+                           f"<div class='cell'>{body}</div></td>")
             out.append("</tr>")
+        out.append("</table>")
+        for spot, _ in spot_tables:
+            if spot.get("note"):
+                out.append(f"<div class='note'><b>{spot['name']}:</b> "
+                           f"{spot['note']}</div>")
 
-            for spot, rows in group:
-                out.append(f"<tr><td class='spot'>{spot['name']}<br>"
-                           f"<span class='cell'>{spot['drive_min']} min</span></td>")
-                for row in rows:
-                    dots = "".join(DOT[r["verdict"]] for r in row["results"]) or "&mdash;"
-                    texts = [cell_text(r) or "&mdash;" for r in row["results"]]
-                    body = "" if all(t == "&mdash;" for t in texts) \
-                        else "<br>".join(texts)
-                    out.append(f"<td><span class='dots'>{dots}</span>"
-                               f"<div class='cell'>{body}</div></td>")
-                out.append("</tr>")
-            out.append("</table>")
-            for spot, _ in group:
-                if spot.get("note"):
-                    out.append(f"<div class='note'><b>{spot['name']}:</b> "
-                               f"{spot['note']}</div>")
-
-    out.append("<div class='legend'>Twee bolletjes per dag = twee onafhankelijke "
-               "weermodellen. Twee keer groen betekent dat ze het eens zijn. "
-               "Groen naast rood betekent: nog onzeker, morgen opnieuw kijken.<br>"
-               "Dag 1-2 draaien op HARMONIE (KNMI, 2 km) en ICON-D2 (2 km). "
-               "Verder vooruit op ECMWF en ICON global, die grover zijn.<br>"
+    out.append("<div class='legend'>Twee bolletjes per dag = twee modellen. "
+               "Dag 1-2 draaien op HARMONIE (KNMI, 2 km) en ICON-D2 (2 km), "
+               "daarna op ECMWF en ICON global, die grover zijn.<br>"
                "Tijden lopen tot een uur voor zonsondergang.<br>"
                "&Delta; is het verschil tussen gemiddelde wind en de vlagen."
                "</div>")
     return "\n".join(out)
 
 
-def summarise(tables: dict, days: list) -> tuple[str, str]:
-    hits = []
-    for rider_key, spot_tables in tables.items():
-        for spot, rows in spot_tables:
-            if RIDERS[rider_key]["needs_shallow"] and not spot["shallow"]:
-                continue
-            for row in rows:
-                greens = [r for r in row["results"] if r["verdict"] == GREEN]
-                if greens and len(greens) == len(row["results"]):
-                    d = row["day"]
-                    a, b = greens[0]["window"]
-                    hits.append((RIDERS[rider_key]["label"], spot["name"],
-                                 f"{DAYNAMES[d.weekday()]} {d.day}", f"{a}-{b}u"))
+def wind_windows(spot: dict, rider: dict, available: dict, day,
+                 daylight: dict) -> list:
+    loose = dict(rider, max_delta=999)
+    found = []
+    for m in models_for_day(available, day):
+        res = score_model_day(available[m][day], spot, loose, daylight.get(day))
+        if res["verdict"] == GREEN and res["window"]:
+            found.append(res)
+    return found
 
-    if not hits:
-        return "Kitecheck: niks groens deze week", \
-               "Geen enkele dag waarop beide modellen het eens zijn.\n"
 
-    lines = [f"{r} - {s}, {d} {w}" for r, s, d, w in hits]
-    subject = f"Kitecheck: {len(hits)} kans" + ("en" if len(hits) > 1 else "")
-    return subject, "\n".join(lines) + "\n"
+def gust_mark(delta: int, rider: dict) -> str:
+    if delta <= rider["max_delta"]:
+        return "rustig"
+    if delta <= rider["max_delta"] + 4:
+        return "schokkerig"
+    return "erg vlagerig"
+
+
+def wave_note(waves: dict, day, window) -> str:
+    hours = waves.get(day, {})
+    vals = [v for h, v in hours.items() if window[0] <= h < window[1]]
+    if not vals:
+        return ""
+    return f", golven tot {max(vals):.1f} m"
+
+
+def digest(cache: dict, light: dict, waves: dict, days: list) -> tuple[str, str]:
+    blocks, headline = [], []
+
+    for rider_key, rider in RIDERS.items():
+        lines, first = [], None
+        for day in days:
+            label = f"{DAYNAMES[day.weekday()]} {day.day}"
+            entries = []
+            for spot in SPOTS:
+                if spot["name"] not in cache:
+                    continue
+                if rider["needs_shallow"] and not spot["shallow"]:
+                    continue
+                found = wind_windows(spot, rider, cache[spot["name"]], day,
+                                     light.get(spot["name"], {}))
+                if not found:
+                    continue
+                agree = "beide modellen" if len(found) > 1 else "1 van 2 modellen"
+                best = min(found, key=lambda r: r["delta"])
+                a, b = best["window"]
+                lo, hi = best["speed"]
+                kn = f"{lo}" if lo == hi else f"{lo}-{hi}"
+                entries.append(
+                    f"    {spot['name']} {a}-{b}u, {kn} kn, "
+                    f"delta {best['delta']} ({gust_mark(best['delta'], rider)})"
+                    f"{wave_note(waves.get(spot['name'], {}), day, best['window'])}"
+                    f" [{agree}]\n      {WF}{spot.get('wf', '')}")
+                if first is None:
+                    first = (label, spot["name"], f"{a}-{b}u", kn,
+                             best["delta"], rider)
+            lines.append(f"  {label}:" + ("" if entries else " geen wind"))
+            lines.extend(entries)
+
+        if first:
+            lab, sp, win, kn, dl, rd = first
+            headline.append(f"{rd['label']}: {lab} {sp} {win} ({kn} kn, "
+                            f"{gust_mark(dl, rd)})")
+        else:
+            headline.append(f"{rider['label']}: niets met genoeg wind")
+
+        blocks.append(f"{rider['label']} ({rider['min_kn']}-{rider['max_kn']} kn)\n"
+                      + "\n".join(lines))
+
+    subject = "Kitecheck -- " + " | ".join(headline)
+    body = "KOMENDE 7 DAGEN\n" + "\n".join(headline) + "\n\n" + \
+           "\n\n".join(blocks) + "\n"
+    return subject[:150], body
 
 
 def send_mail(subject: str, body: str, url: str | None) -> None:
@@ -335,6 +399,7 @@ def main() -> int:
     all_days: set = set()
     cache: dict = {}
     light: dict = {}
+    waves: dict = {}
 
     for spot in SPOTS:
         try:
@@ -349,6 +414,7 @@ def main() -> int:
             continue
         cache[spot["name"]] = available
         light[spot["name"]] = daylight_map(data)
+        waves[spot["name"]] = fetch_waves(spot)
         for d in available.values():
             all_days.update(d.keys())
 
@@ -372,7 +438,8 @@ def main() -> int:
         fh.write(html)
     print("docs/index.html geschreven")
 
-    subject, body = summarise(tables, days)
+    subject, body = digest(cache, light, waves, days)
+    print(body)
     send_mail(subject, body, os.environ.get("PAGES_URL"))
     return 0
 
